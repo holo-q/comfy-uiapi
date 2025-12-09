@@ -1,11 +1,11 @@
-# comfy-uiapi-client
+# comfy-uiapi
 
 Python client for [ComfyUI-uiapi](https://github.com/oxysoft/ComfyUI-uiapi) - programmatic control of ComfyUI workflows.
 
 ## Installation
 
 ```bash
-pip install comfy-uiapi-client
+pip install comfy-uiapi
 ```
 
 Or for development:
@@ -17,7 +17,7 @@ pip install -e /path/to/comfy-uiapi-client
 ## Quick Start
 
 ```python
-from comfy_uiapi_client import ComfyClient
+from comfy_uiapi import ComfyClient
 
 # Connect to ComfyUI with uiapi extension
 client = ComfyClient("127.0.0.1:8188")
@@ -75,7 +75,7 @@ result = client.execute_workflow(
 ## Model Downloads
 
 ```python
-from comfy_uiapi_client import ComfyClient, ModelDef
+from comfy_uiapi import ComfyClient, ModelDef
 
 client = ComfyClient("127.0.0.1:8188")
 
@@ -97,7 +97,7 @@ All methods have async variants:
 
 ```python
 import asyncio
-from comfy_uiapi_client import ComfyClient
+from comfy_uiapi import ComfyClient
 
 async def main():
     client = ComfyClient("127.0.0.1:8188")

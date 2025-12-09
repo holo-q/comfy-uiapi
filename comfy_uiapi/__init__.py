@@ -1,10 +1,10 @@
 """
-comfy-uiapi-client: Python client for ComfyUI-uiapi
+comfy-uiapi: Python client for ComfyUI-uiapi
 
 Provides programmatic control of ComfyUI workflows via the uiapi extension.
 
 Usage:
-    from comfy_uiapi_client import ComfyClient, ModelDef
+    from comfy_uiapi import ComfyClient, ModelDef
 
     client = ComfyClient("127.0.0.1:8188")
     client.ensure_connection()

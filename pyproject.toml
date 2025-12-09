@@ -29,8 +29,8 @@ dependencies = [
 dev = ["ruff", "pytest", "pytest-asyncio"]
 
 [project.urls]
-Homepage = "https://github.com/holo-q/comfy-uiapi-client"
-Repository = "https://github.com/holo-q/comfy-uiapi-client"
+Homepage = "https://github.com/holo-q/comfy-uiapi"
+Repository = "https://github.com/holo-q/comfy-uiapi"
 
 [build-system]
 requires = ["hatchling"]

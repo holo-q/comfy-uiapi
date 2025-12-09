@@ -728,6 +728,39 @@ class ComfyClient:
         """Get current workflow state"""
         return await self.json_post_async("/uiapi/get_workflow")
 
+    def load_workflow(self, workflow: dict) -> dict:
+        """Load a workflow into the connected WebUI (sync)"""
+        return self.run_sync(self.load_workflow_async(workflow))
+
+    async def load_workflow_async(self, workflow: dict) -> dict:
+        """Load a workflow into the connected WebUI without confirmation dialog.
+
+        This loads an API-format workflow into the browser for visual editing
+        and execution via uiapi. ComfyUI will auto-layout the nodes.
+
+        Args:
+            workflow: API-format workflow dict (node IDs as keys)
+
+        Returns:
+            dict with 'loaded' (bool) and 'message' (str)
+
+        Raises:
+            ComfyConnectionError: If no WebUI is connected
+        """
+        log.info("Loading workflow into WebUI...")
+        response = await self._make_request(
+            "POST",
+            "/uiapi/load_workflow",
+            {"workflow": workflow}
+        )
+        if isinstance(response, dict):
+            if response.get("loaded"):
+                log.info("Workflow loaded into WebUI successfully")
+            else:
+                log.warning(f"Failed to load workflow: {response.get('error', 'Unknown error')}")
+            return response
+        raise ValueError(f"Unexpected response: {response}")
+
     async def get_history_async(self, prompt_id: str) -> dict:
         """Get execution history"""
         return await self._make_request("GET", f"/history/{prompt_id}")

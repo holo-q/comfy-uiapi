@@ -1,6 +1,6 @@
 # comfy-uiapi-client
 
-Python client for [ComfyUI-uiapi](https://github.com/holo-q/ComfyUI-uiapi) - programmatic control of ComfyUI workflows.
+Python client for [ComfyUI-uiapi](https://github.com/oxysoft/ComfyUI-uiapi) - programmatic control of ComfyUI workflows.
 
 ## Installation
 

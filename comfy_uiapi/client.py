@@ -163,7 +163,7 @@ class ComfyClient:
         self.workflow: dict | None = None
         self.workflow_fields: dict[str, Any] = {}
 
-        log.info(f"ComfyClient initialized @ {server_address} (id={self.client_id[:8]})")
+        log.debug(f"ComfyClient init @ {server_address} (id={self.client_id[:8]})")
 
     # Connection Management
     # ----------------------------------------
@@ -180,7 +180,7 @@ class ComfyClient:
     async def connect_ws(self, timeout: float = 10):
         """Establish WebSocket connection"""
         ws_url = f"ws://{self.server_address}/ws?clientId={self.client_id}"
-        return connect(ws_url, open_timeout=timeout)
+        return await connect(ws_url, open_timeout=timeout)
 
     async def ensure_connection_async(self, require_webui: bool | None = None, loop: bool = True) -> bool:
         """Ensure both HTTP and WebSocket connections are alive (async)"""
@@ -190,7 +190,7 @@ class ComfyClient:
             while True:
                 try:
                     if not self._webui_ready:
-                        log.info(f"Checking ComfyUI connection at {self.server_address}...")
+                        log.debug(f"Checking ComfyUI @ {self.server_address}...")
 
                     if require_webui:
                         resp = await self._make_request_once("GET", "/uiapi/connection_status")
@@ -764,17 +764,15 @@ class ComfyClient:
         Raises:
             ComfyConnectionError: If no WebUI is connected
         """
-        log.info("Loading workflow into WebUI...")
+        log.debug("Loading workflow into WebUI...")
         response = await self._make_request(
             "POST",
             "/uiapi/load_workflow",
             {"workflow": workflow}
         )
         if isinstance(response, dict):
-            if response.get("loaded"):
-                log.info("Workflow loaded into WebUI successfully")
-            else:
-                log.warning(f"Failed to load workflow: {response.get('error', 'Unknown error')}")
+            if not response.get("loaded"):
+                log.warning(f"Load workflow failed: {response.get('error', 'Unknown error')}")
             return response
         raise ValueError(f"Unexpected response: {response}")
 

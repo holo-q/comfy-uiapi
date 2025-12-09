@@ -36,7 +36,24 @@ from websockets.asyncio.client import connect
 
 from .model_defs import ModelDef
 
+# Module-level logger (can be overridden via set_logger)
 log = logging.getLogger(__name__)
+
+
+def set_logger(logger: logging.Logger) -> None:
+    """Override the module logger with a custom logger instance.
+
+    This allows integrating with application-specific logging setups.
+
+    Example:
+        from comfy_uiapi import client
+        from myapp.logging import get_logger
+
+        client.set_logger(get_logger("comfy", tag_prefix="comfy"))
+    """
+    global log
+    log = logger
+
 
 PNG_MAGIC_BYTES = b"\x89PNG\r\n\x1a\n"
 

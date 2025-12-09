@@ -12,8 +12,8 @@ Usage:
     result = client.execute()
 """
 
-from .client import ComfyClient, ComfyConnectionError
-from .model_defs import ModelDef, ControlNetDef, LoraDef, VaeDef
+from .client import ComfyClient, ComfyConnectionError, set_logger
+from .model_defs import ControlNetDef, LoraDef, ModelDef, VaeDef
 
 __all__ = [
     "ComfyClient",
@@ -22,6 +22,7 @@ __all__ = [
     "ControlNetDef",
     "LoraDef",
     "VaeDef",
+    "set_logger",
 ]
 
 __version__ = "0.1.0"

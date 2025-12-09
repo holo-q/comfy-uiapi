@@ -24,7 +24,7 @@ import threading
 import time
 import urllib.parse
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import Any, BinaryIO, TypedDict, cast
 
 import aiofiles
@@ -32,10 +32,9 @@ import cv2
 import httpx
 import numpy as np
 from PIL import Image
-from websockets.sync.client import connect
+from websockets.asyncio.client import connect
 
 from .model_defs import ModelDef
-
 
 log = logging.getLogger(__name__)
 
@@ -140,7 +139,7 @@ class ComfyClient:
         self.server_address = server_address
         self.client_id = str(uuid.uuid4())
         self._webui_ready = False
-        self._connection_lock = asyncio.Lock()
+        self._connection_lock: asyncio.Lock | None = None  # Lazy-init in async context
         self._reconnect_backoff = 1.0
         self._sync_lock = threading.Lock()
         self.require_webui = True
@@ -151,6 +150,12 @@ class ComfyClient:
 
     # Connection Management
     # ----------------------------------------
+    def _get_connection_lock(self) -> asyncio.Lock:
+        """Lazy-init connection lock (must be created in async context)"""
+        if self._connection_lock is None:
+            self._connection_lock = asyncio.Lock()
+        return self._connection_lock
+
     def ensure_connection(self, require_webui: bool | None = None, loop: bool = True) -> bool:
         """Ensure both HTTP and WebSocket connections are alive (sync)"""
         return self.run_sync(self.ensure_connection_async(require_webui=require_webui, loop=loop))
@@ -164,7 +169,7 @@ class ComfyClient:
         """Ensure both HTTP and WebSocket connections are alive (async)"""
         require_webui = require_webui if require_webui is not None else self.require_webui
 
-        async with self._connection_lock:
+        async with self._get_connection_lock():
             while True:
                 try:
                     if not self._webui_ready:
@@ -176,8 +181,9 @@ class ComfyClient:
                         if resp.get("active_clients", 0) == 0:
                             raise ConnectionError("WebUI not connected")
 
+                    # Test WebSocket connection (close immediately)
                     ws = await self.connect_ws()
-                    ws.close()
+                    await ws.close()
                     self._webui_ready = True
                     return True
 
@@ -260,14 +266,30 @@ class ComfyClient:
     # Sync/Async Bridge
     # ----------------------------------------
     def run_sync(self, coroutine):
-        """Run a coroutine synchronously"""
+        """
+        Run a coroutine synchronously.
+
+        CRITICAL: Cannot be called from async context (will deadlock).
+        Creates isolated event loop for thread safety.
+        """
+        # Prevent deadlock: cannot call from async context
+        try:
+            asyncio.get_running_loop()
+            raise RuntimeError(
+                "run_sync() called from async context - use await instead. "
+                "This would deadlock. Call the async version directly."
+            )
+        except RuntimeError:
+            pass  # No running loop, safe to proceed
+
         with self._sync_lock:
+            # Always create new loop for isolation (prevents state leakage)
+            loop = asyncio.new_event_loop()
             try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-            return loop.run_until_complete(coroutine)
+                return loop.run_until_complete(coroutine)
+            finally:
+                # Clean up the loop to prevent resource leak
+                loop.close()
 
     # JSON API Helpers
     # ----------------------------------------
@@ -405,18 +427,14 @@ class ComfyClient:
             if not isinstance(ret, dict):
                 raise ValueError(f"Unexpected response format: {ret}")
 
-            # Handle broken responses with retry
-            max_retries = 3
-            for attempt in range(max_retries):
-                if "response" not in ret or "prompt_id" not in ret.get("response", {}):
-                    log.warning(f"Broken response (attempt {attempt + 1}/{max_retries}), retrying...")
-                    await asyncio.sleep(1)
-                    await self.ensure_connection_async()
-                    ret = await self.json_post_async("/uiapi/execute")
-                else:
-                    break
-            else:
-                raise ValueError("Maximum retries exceeded for broken responses")
+            # Validate response structure immediately - no retry on malformed response
+            # (retrying would send ANOTHER execution, not re-query the same one)
+            if "response" not in ret or "prompt_id" not in ret.get("response", {}):
+                raise ValueError(
+                    f"Malformed execution response (missing prompt_id). "
+                    f"Response: {ret}. "
+                    f"This indicates a server-side issue, not a transient network error."
+                )
 
             exec_id = ret["response"]["prompt_id"]
 
@@ -461,16 +479,21 @@ class ComfyClient:
         pass
 
     async def await_execution(self):
-        """Wait for execution completion via WebSocket"""
+        """
+        Wait for execution completion via WebSocket.
+
+        CRITICAL: Properly closes WebSocket on error to prevent resource leak.
+        Uses async iteration for message receiving.
+        """
         start_time = time.time()
         max_timeout = 90
         last_status_time = 0
         got_execution_status = False
         ws = await self.connect_ws(max_timeout)
 
-        while True:
-            try:
-                out = ws.recv()
+        try:
+            # Use async for to iterate over messages
+            async for message in ws:
                 current_time = time.time()
                 elapsed = current_time - start_time
 
@@ -478,8 +501,8 @@ class ComfyClient:
                     log.info(f"Execution status: Running for {elapsed:.1f}s")
                     last_status_time = current_time
 
-                if isinstance(out, str):
-                    msg = json.loads(out)
+                if isinstance(message, str):
+                    msg = json.loads(message)
                     msg_type = msg["type"]
 
                     if msg_type == "status":
@@ -508,12 +531,12 @@ class ComfyClient:
                     elif msg_type == "execution_success":
                         break
 
-            except Exception as e:
-                log.warning(f"Execution monitoring interrupted: {e!s}")
-                ws = await self.connect_ws()
-
-        if ws:
-            ws.close()
+        except Exception as e:
+            log.error(f"Execution monitoring failed: {e!s}")
+            raise
+        finally:
+            # CRITICAL: Always close WebSocket to prevent resource leak
+            await ws.close()
 
     # Workflow API (direct, no WebUI)
     # ----------------------------------------
@@ -568,11 +591,18 @@ class ComfyClient:
                         node["inputs"] = {}
 
                     # Handle image uploads
-                    if is_image(value) or (
-                        isinstance(value, str) and any(value.lower().endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".webp"])
-                    ):
+                    image_extensions = [".png", ".jpg", ".jpeg", ".webp"]
+                    is_image_path = isinstance(value, str) and any(
+                        value.lower().endswith(ext) for ext in image_extensions
+                    )
+                    if is_image(value) or is_image_path:
                         try:
-                            response = await self.upload_image(value, folder_type="input", overwrite=True, filename=f"INPUT_{node_title}")
+                            response = await self.upload_image(
+                                value,
+                                folder_type="input",
+                                overwrite=True,
+                                filename=f"INPUT_{node_title}",
+                            )
                             value = response["name"]
                         except Exception as e:
                             log.error(f"Failed to upload image for {path}: {e}")
@@ -648,7 +678,11 @@ class ComfyClient:
 
         start_time = time.time()
         try:
-            resp = await self._make_request("POST", "/uiapi/download_models", {"download_table": download_table, "workflow": workflow})
+            resp = await self._make_request(
+                "POST",
+                "/uiapi/download_models",
+                {"download_table": download_table, "workflow": workflow},
+            )
             assert isinstance(resp, dict)
 
             download_id = resp.get("download_id")
